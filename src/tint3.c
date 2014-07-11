@@ -31,6 +31,7 @@
 #include "utils.h"
 #include "config.h"
 #include "defaults.h"
+#include <sys/time.h>
 
 #define INRECT(x,y,rx,ry,rw,rh) ((x) >= (rx) && (x) < (rx)+(rw) && (y) >= (ry) && (y) < (ry)+(rh))
 #define MIN(a,b)                ((a) < (b) ? (a) : (b))
@@ -235,7 +236,8 @@ baritem * window_s() {
 
 
 /* END SPACE FOR MODULE FUNCTIONS */
-
+itemlist * left = NULL, * right = NULL, * center = NULL;
+int bounds[6];
 
 void drawmenu(void) {
     dc->x = 0;
@@ -251,11 +253,11 @@ void drawmenu(void) {
 
     drawrect(dc, 0, 0, mw, height, True, normcol->BG);
 
-    itemlist * left = config_to_list(LEFT_ALIGN);
-    itemlist * right = config_to_list(RIGHT_ALIGN);
-    itemlist * center = config_to_list(CENTER_ALIGN);
+    left = config_to_list(LEFT_ALIGN);
+    right = config_to_list(RIGHT_ALIGN);
+    center = config_to_list(CENTER_ALIGN);
 
-               total_list_length(left);
+    int llen = total_list_length(left);
     int rlen = total_list_length(right);
     int clen = total_list_length(center);
 
@@ -265,15 +267,62 @@ void drawmenu(void) {
     dc -> x = (mw-clen)/2;
     draw_list(center);
 
-    free_list(left);
-    free_list(right);
-    free_list(center);
+    bounds[0] = 0;
+    bounds[1] = llen;
+    bounds[2] = mw/2 - clen/2;
+    bounds[3] = mw/2 + clen/2;
+    bounds[4] = mw - rlen;
+    bounds[5] = mw;
 
     mapdc(dc, win, mw, height);
 }
 
+baritem * get_item_by_X(int x, itemlist * list) {
+    unsigned int len = 0;
+    while(list != NULL) {
+        if (x < len + list -> item -> length) {
+            return list -> item;
+        }
+        len += list -> item -> length;
+        list = list -> next;
+    }
+    return NULL;
+}
 
-
+void handle_click(int x, int y) {
+    int pos = 0;
+    while(x > bounds[pos+1]) {
+        pos++;
+    }
+    switch(pos) {
+        case 0:
+            {
+                baritem * clicked = get_item_by_X(x, left);
+                if (clicked != NULL) {
+                    printf("%s\n", clicked -> string);
+                }
+            }
+            break;
+        case 2:
+            {
+                baritem * clicked = get_item_by_X(x-bounds[2], center);
+                if (clicked != NULL) {
+                    printf("%s\n", clicked -> string);
+                }
+            }
+            break;
+        case 4:
+            {
+                baritem * clicked = get_item_by_X(x-bounds[4], right);
+                if (clicked != NULL) {
+                    printf("%s\n", clicked -> string);
+                }
+            }
+            break;
+        default:
+            puts("gap");
+    }
+}
 
 itemlist * config_to_list (char * list) {
     itemlist * head = NULL;
@@ -351,14 +400,29 @@ void draw_list(itemlist * list) {
     }
 }
 
+unsigned long long microtime() {
+    struct timeval tv;
+    gettimeofday(&tv,NULL);
+    return tv.tv_sec*(unsigned long long)1000000+tv.tv_usec;
+}
+
 void run(void) {
     while(1){
+        unsigned long long tt = microtime();
         drawmenu();
         XEvent xe;
         while(QLength(dc->dpy)) {
             XNextEvent(dc->dpy, &xe);
+            // xe.type : 4 => click
+            // xe.type : 6 => move
+            if (xe.type == 4) {
+                handle_click(xe.xbutton.x, xe.xbutton.y);
+            }
         }
-        usleep(100000);
+        free_list(left);
+        free_list(right);
+        free_list(center);
+        while(microtime() - tt < 100000);
     }
 }
 
@@ -391,6 +455,7 @@ void setup(void) {
                         DefaultVisual(dc->dpy, screen),
                         CWOverrideRedirect | CWBackPixmap | CWEventMask, &wa);
 
+    XSelectInput(dc->dpy, root, ButtonPressMask | PointerMotionMask) ;
     resizedc(dc, mw, height);
     XMapRaised(dc->dpy, win);
 }
